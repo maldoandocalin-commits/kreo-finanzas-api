@@ -12,7 +12,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 app = Flask(__name__)
 
-# Configuración estricta de CORS adaptada para la Web y el contenedor nativo de la APK en Android
+# Configuración abierta de CORS para aceptar la Web y la APK sin bloqueos
 CORS(
     app,
     resources={
@@ -23,10 +23,39 @@ CORS(
                 "capacitor://localhost",
                 "http://localhost",
                 "http://localhost:8100",
+                "*",  # Comodín de respaldo para evitar cualquier rechazo en dispositivos móviles
             ]
         }
     },
 )
+
+
+# MANEJADOR GLOBAL DE PREFLIGHT (Evita el error 502 Bad Gateway en OPTIONS)
+@app.before_request
+def handle_preflight():
+  if request.method == "OPTIONS":
+    response = jsonify({"status": "ok"})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add(
+        "Access-Control-Allow-Headers", "Content-Type,Authorization,Accept"
+    )
+    response.headers.add(
+        "Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS"
+    )
+    return response, 200
+
+
+@app.after_request
+def add_cors_headers(response):
+  response.headers["Access-Control-Allow-Origin"] = "*"
+  response.headers["Access-Control-Allow-Headers"] = (
+      "Content-Type,Authorization,Accept"
+  )
+  response.headers["Access-Control-Allow-Methods"] = (
+      "GET,POST,PUT,DELETE,OPTIONS"
+  )
+  return response
+
 
 # Configuración de remitente profesional con Resend
 REMITENTE = "Kreo Finanzas <contacto@acreditmh.store>"
@@ -594,4 +623,4 @@ def api_enviar_pin():
 
 if __name__ == "__main__":
   port = int(os.environ.get("PORT", 5000))
-  app.run(host="0.0.0.0", port=port, debug=True)
+  app.run(host="0.0.0.0", port=port, debug=False)
