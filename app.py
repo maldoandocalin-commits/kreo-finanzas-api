@@ -11,7 +11,22 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 app = Flask(__name__)
-CORS(app)  # Esto evita cualquier bloqueo entre puertos
+
+# Configuración estricta de CORS adaptada para la Web y el contenedor nativo de la APK en Android
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "https://web-production-c5c1a01e.up.railway.app",
+                "https://appassets.androidplatform.net",
+                "capacitor://localhost",
+                "http://localhost",
+                "http://localhost:8100",
+            ]
+        }
+    },
+)
 
 # Configuración de remitente profesional con Resend
 REMITENTE = "Kreo Finanzas <contacto@acreditmh.store>"
@@ -20,10 +35,6 @@ REMITENTE = "Kreo Finanzas <contacto@acreditmh.store>"
 def enviar_email_resend(
     destinatario, asunto, contenido_html, pdf_path=None, nombre_pdf=None
 ):
-  """Función universal para enviar correos transaccionales (PINs y Contratos)
-
-  a través de la API HTTP de Resend, evitando bloqueos en la nube.
-  """
   api_key = os.environ.get("RESEND_API_KEY")
   url = "https://api.resend.com/emails"
 
@@ -39,7 +50,6 @@ def enviar_email_resend(
       "html": contenido_html,
   }
 
-  # Si se adjunta un contrato en PDF, se convierte a Base64 para enviarlo por la API
   if pdf_path and os.path.exists(pdf_path):
     with open(pdf_path, "rb") as f:
       pdf_bytes = f.read()
@@ -91,7 +101,6 @@ def generar_pdf_contrato(
   )
 
   estilo_der = ParagraphStyle("TextoDerecha", parent=estilo_texto, alignment=2)
-
   estilo_bold_der = ParagraphStyle(
       "BoldDerecha", parent=estilo_texto, fontName="Helvetica-Bold", alignment=2
   )
@@ -115,7 +124,6 @@ def generar_pdf_contrato(
 
   meses = plazo_val / 30.0
 
-  # MATRIZ DE TOTALES EXACTOS PARA 1 MES (30 DÍAS)
   totales_un_mes = {
       100: 113.50,
       200: 223.50,
@@ -135,12 +143,10 @@ def generar_pdf_contrato(
   )
   ganancia_un_mes = base_un_mes - monto_val
 
-  # Total real proporcional a los meses
   total_calculado_real = monto_val + (ganancia_un_mes * meses)
   if total_val <= monto_val:
     total_val = total_calculado_real
 
-  # Desglose transparente legal
   interes_calculado = round(monto_val * 0.045 * meses, 2)
   comision_calculada = round(
       (ganancia_un_mes * meses) - interes_calculado, 2
@@ -148,7 +154,6 @@ def generar_pdf_contrato(
   if comision_calculada < 0:
     comision_calculada = 0.00
 
-  # TCEA y TCEM según el plazo
   if meses == 1.0:
     tcea_str = "48.20 %"
     tcem_str = "4.50 %"
@@ -159,7 +164,6 @@ def generar_pdf_contrato(
     tcea_str = "55.40 %"
     tcem_str = "4.90 %"
 
-  # --- CABECERA ---
   header_data = [
       [
           Paragraph(
@@ -249,7 +253,6 @@ def generar_pdf_contrato(
       )
   )
   story.append(Spacer(1, 3))
-
   story.append(
       Paragraph(
           "<b>Condiciones del Contrato de Préstamo</b>",
@@ -384,7 +387,6 @@ def generar_pdf_contrato(
   for i in range(1, cuotas_count + 1):
     fecha_cuota = dt_emision + timedelta(days=15 * i)
     fecha_cuota_str = fecha_cuota.strftime("%d.%m.%Y")
-
     if i == cuotas_count:
       monto_cuota = round(total_val - acumulado, 2)
     else:
@@ -437,7 +439,6 @@ def generar_pdf_contrato(
       )
   )
 
-  # --- BLOQUE DE FIRMAS CON EL PIN DEL CLIENTE EN EL PDF ---
   story.append(Spacer(1, 12))
   firma_data = [
       [
@@ -470,7 +471,6 @@ def generar_pdf_contrato(
 @app.route("/api/enviar-correo-aprobacion", methods=["POST"])
 def api_enviar_correo():
   datos = request.get_json() or {}
-  print("DATOS RECIBIDOS EN APROBACIÓN:", datos)
   destinatario = datos.get("email")
   nombre = datos.get("nombre", "Cliente")
   dni = datos.get("dni", "00000000")
@@ -523,7 +523,6 @@ def api_enviar_correo():
         </div>
         """
 
-    # Envío mediante Resend API
     resultado = enviar_email_resend(
         destinatario=destinatario,
         asunto=asunto,
@@ -535,10 +534,6 @@ def api_enviar_correo():
     if os.path.exists(pdf_path):
       os.remove(pdf_path)
 
-    print(
-        f"¡Correo de desembolso enviado con éxito y contrato PDF adjunto para"
-        f" {destinatario} mediante Resend!"
-    )
     return jsonify({
         "status": "success",
         "message": "Correo y contrato de desembolso enviados con éxito",
@@ -547,30 +542,20 @@ def api_enviar_correo():
   except Exception as e:
     if os.path.exists(pdf_path):
       os.remove(pdf_path)
-    print(f"Error al procesar PDF o enviar correo con Resend: {e}")
     return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/enviar-pin-firma", methods=["POST"])
 def api_enviar_pin():
   datos = request.get_json() or {}
-  print("--- PETICIÓN RECIBIDA EN /api/enviar-pin-firma ---")
-  print("Datos JSON completos:", datos)
-
   destinatario = datos.get("email")
   nombre = datos.get("nombre", "Cliente")
 
   if not destinatario:
-    print(
-        "❌ ERROR 400: El campo 'email' llegó vacío o no se envió desde el"
-        " frontend."
-    )
     return (
         jsonify({
             "status": "error",
-            "message": (
-                "Falta el correo destinatario en los datos enviados al servidor"
-            ),
+            "message": "Falta el correo destinatario en los datos enviados",
         }),
         400,
     )
@@ -587,18 +572,16 @@ def api_enviar_pin():
             <div style="background: #EFE9F8; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; color: #4B2E83; border-radius: 8px; letter-spacing: 4px; margin: 20px 0;">
                 {pin}
             </div>
-            <p>Este código es necesario para completar tu solicitud de préstamo. Si no solicitaste este código, puedes ignorar este mensaje.</p>
+            <p>Este código es necesario para completar tu solicitud de préstamo.</p>
             <br>
             <p style="font-size: 12px; color: #64748b;">Atentamente,<br><b>Inversiones MH S.A.C.S.</b></p>
         </div>
         """
 
-    # Envío mediante Resend API
     resultado = enviar_email_resend(
         destinatario=destinatario, asunto=asunto, contenido_html=mensaje_html
     )
 
-    print(f"✅ PIN {pin} enviado con éxito a {destinatario} mediante Resend")
     return jsonify({
         "status": "success",
         "pin": pin,
@@ -606,7 +589,6 @@ def api_enviar_pin():
         "resend_response": resultado,
     })
   except Exception as e:
-    print(f"❌ Error al enviar PIN con Resend: {e}")
     return jsonify({"status": "error", "message": str(e)}), 500
 
 
