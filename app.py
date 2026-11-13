@@ -1,13 +1,10 @@
+import base64
 from datetime import datetime, timedelta
 import os
 import random
-import smtplib
-from email import encoders
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+import requests
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -16,11 +13,49 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 app = Flask(__name__)
 CORS(app)  # Esto evita cualquier bloqueo entre puertos
 
-# Configuración para Zoho Mail con TLS
-SMTP_HOST = "smtp.zoho.com"
-SMTP_PORT = 587
-REMITENTE = "contacto@acreditmh.store"
-PASSWORD_APP = "mQnFzxucpSyg"  # Contraseña exacta sin espacios
+# Configuración de remitente profesional con Resend
+REMITENTE = "Kreo Finanzas <contacto@acreditmh.store>"
+
+
+def enviar_email_resend(
+    destinatario, asunto, contenido_html, pdf_path=None, nombre_pdf=None
+):
+  """Función universal para enviar correos transaccionales (PINs y Contratos)
+
+  a través de la API HTTP de Resend, evitando bloqueos en la nube.
+  """
+  api_key = os.environ.get("RESEND_API_KEY")
+  url = "https://api.resend.com/emails"
+
+  headers = {
+      "Authorization": f"Bearer {api_key}",
+      "Content-Type": "application/json",
+  }
+
+  payload = {
+      "from": REMITENTE,
+      "to": [destinatario],
+      "subject": asunto,
+      "html": contenido_html,
+  }
+
+  # Si se adjunta un contrato en PDF, se convierte a Base64 para enviarlo por la API
+  if pdf_path and os.path.exists(pdf_path):
+    with open(pdf_path, "rb") as f:
+      pdf_bytes = f.read()
+      pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    payload["attachments"] = [{
+        "filename": nombre_pdf or "Contrato_Kreo_Finanzas.pdf",
+        "content": pdf_base64,
+    }]
+
+  try:
+    response = requests.post(url, json=payload, headers=headers)
+    return response.json()
+  except Exception as e:
+    print(f"Error al conectar con la API de Resend: {e}")
+    return {"error": str(e)}
 
 
 def generar_pdf_contrato(
@@ -478,47 +513,41 @@ def api_enviar_correo():
     )
 
     asunto = f"Contrato y Cronograma de Préstamo Desembolsado No. {nro_contrato}"
-    mensaje_texto = f"Hola {nombre}, le informamos que su préstamo ha sido desembolsado exitosamente. Le adjuntamos su contrato de préstamo número {nro_contrato} con su respectivo cronograma quincenal en PDF y su firma electrónica validada."
+    mensaje_html = f"""
+        <div style="font-family: Arial, sans-serif; color: #1E293B;">
+            <h2 style="color: #4B2E83;">¡Hola {nombre}!</h2>
+            <p>Le informamos que su préstamo ha sido desembolsado exitosamente a través de <b>Kreo Finanzas</b> (Inversiones MH S.A.C.S.).</p>
+            <p>Le adjuntamos su contrato de préstamo número <b>{nro_contrato}</b> con su respectivo cronograma quincenal en PDF y su firma electrónica validada.</p>
+            <br>
+            <p style="font-size: 12px; color: #64748b;">Atentamente,<br><b>Equipo de Kreo Finanzas</b></p>
+        </div>
+        """
 
-    msg = MIMEMultipart()
-    msg["From"] = REMITENTE
-    msg["To"] = destinatario
-    msg["Subject"] = asunto
-    msg.attach(MIMEText(mensaje_texto, "plain"))
-
-    with open(pdf_path, "rb") as f:
-      part = MIMEBase("application", "pdf")
-      part.set_payload(f.read())
-    encoders.encode_base64(part)
-    part.add_header(
-        "Content-Disposition",
-        f"filename=Contrato_Kreo_Finanzas_{dni}.pdf",
+    # Envío mediante Resend API
+    resultado = enviar_email_resend(
+        destinatario=destinatario,
+        asunto=asunto,
+        contenido_html=mensaje_html,
+        pdf_path=pdf_path,
+        nombre_pdf=f"Contrato_Kreo_Finanzas_{dni}.pdf",
     )
-    msg.attach(part)
-
-    server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
-    server.starttls()
-    server.login(REMITENTE, PASSWORD_APP)
-    server.sendmail(REMITENTE, destinatario, msg.as_string())
-    server.quit()
 
     if os.path.exists(pdf_path):
       os.remove(pdf_path)
 
     print(
         f"¡Correo de desembolso enviado con éxito y contrato PDF adjunto para"
-        f" {destinatario}!"
+        f" {destinatario} mediante Resend!"
     )
-    return jsonify(
-        {
-            "status": "success",
-            "message": "Correo y contrato de desembolso enviados con éxito",
-        }
-    )
+    return jsonify({
+        "status": "success",
+        "message": "Correo y contrato de desembolso enviados con éxito",
+        "resend_response": resultado,
+    })
   except Exception as e:
     if os.path.exists(pdf_path):
       os.remove(pdf_path)
-    print(f"Error SMTP / PDF: {e}")
+    print(f"Error al procesar PDF o enviar correo con Resend: {e}")
     return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -550,30 +579,34 @@ def api_enviar_pin():
 
   try:
     asunto = "Código de Verificación para Firma de Contrato - kreo finanzas"
-    mensaje_texto = (
-        f"Hola {nombre},\n\nTu código PIN de seguridad para firmar y validar tu"
-        f" contrato en kreo finanzas es: {pin}\n\nEste código es necesario para"
-        f" completar tu solicitud de préstamo."
+    mensaje_html = f"""
+        <div style="font-family: Arial, sans-serif; color: #1E293B;">
+            <h2 style="color: #4B2E83;">Código de Verificación</h2>
+            <p>Hola <b>{nombre}</b>,</p>
+            <p>Tu código PIN de seguridad para firmar y validar tu contrato en <b>kreo finanzas</b> es:</p>
+            <div style="background: #EFE9F8; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; color: #4B2E83; border-radius: 8px; letter-spacing: 4px; margin: 20px 0;">
+                {pin}
+            </div>
+            <p>Este código es necesario para completar tu solicitud de préstamo. Si no solicitaste este código, puedes ignorar este mensaje.</p>
+            <br>
+            <p style="font-size: 12px; color: #64748b;">Atentamente,<br><b>Inversiones MH S.A.C.S.</b></p>
+        </div>
+        """
+
+    # Envío mediante Resend API
+    resultado = enviar_email_resend(
+        destinatario=destinatario, asunto=asunto, contenido_html=mensaje_html
     )
 
-    msg = MIMEMultipart()
-    msg["From"] = REMITENTE
-    msg["To"] = destinatario
-    msg["Subject"] = asunto
-    msg.attach(MIMEText(mensaje_texto, "plain"))
-
-    server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
-    server.starttls()
-    server.login(REMITENTE, PASSWORD_APP)
-    server.sendmail(REMITENTE, destinatario, msg.as_string())
-    server.quit()
-
-    print(f"✅ PIN {pin} enviado con éxito a {destinatario}")
-    return jsonify(
-        {"status": "success", "pin": pin, "message": "PIN enviado con éxito"}
-    )
+    print(f"✅ PIN {pin} enviado con éxito a {destinatario} mediante Resend")
+    return jsonify({
+        "status": "success",
+        "pin": pin,
+        "message": "PIN enviado con éxito",
+        "resend_response": resultado,
+    })
   except Exception as e:
-    print(f"❌ Error al enviar correo SMTP del PIN: {e}")
+    print(f"❌ Error al enviar PIN con Resend: {e}")
     return jsonify({"status": "error", "message": str(e)}), 500
 
 
