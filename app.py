@@ -1,3 +1,4 @@
+# app.py
 import base64
 from datetime import datetime, timedelta
 import os
@@ -23,14 +24,13 @@ CORS(
                 "capacitor://localhost",
                 "http://localhost",
                 "http://localhost:8100",
-                "*",  # Comodín de respaldo para evitar cualquier rechazo en dispositivos móviles
+                "*",
             ]
         }
     },
 )
 
 
-# MANEJADOR GLOBAL DE PREFLIGHT (Evita el error 502 Bad Gateway en OPTIONS)
 @app.before_request
 def handle_preflight():
   if request.method == "OPTIONS":
@@ -57,8 +57,10 @@ def add_cors_headers(response):
   return response
 
 
-# Configuración de remitente profesional con Resend
 REMITENTE = "Kreo Finanzas <contacto@acreditmh.store>"
+
+# Almacenamiento temporal en memoria para los PINs activos por DNI (Backend-side validation)
+PENDING_PINS = {}
 
 
 def enviar_email_resend(
@@ -579,6 +581,7 @@ def api_enviar_pin():
   datos = request.get_json() or {}
   destinatario = datos.get("email")
   nombre = datos.get("nombre", "Cliente")
+  dni = datos.get("dni", "00000000")
 
   if not destinatario:
     return (
@@ -590,6 +593,7 @@ def api_enviar_pin():
     )
 
   pin = str(random.randint(1000, 9999))
+  PENDING_PINS[dni] = pin
 
   try:
     asunto = "Código de Verificación para Firma de Contrato - kreo finanzas"
@@ -619,6 +623,36 @@ def api_enviar_pin():
     })
   except Exception as e:
     return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/verify-pin", methods=["POST"])
+def api_verify_pin():
+  datos = request.get_json() or {}
+  dni = datos.get("dni")
+  pin_ingresado = datos.get("pin")
+
+  if not dni or not pin_ingresado:
+    return (
+        jsonify({"status": "error", "message": "Faltan datos de DNI o PIN"}),
+        400,
+    )
+
+  pin_guardado = PENDING_PINS.get(dni)
+
+  if pin_guardado and pin_guardado == pin_ingresado:
+    del PENDING_PINS[dni]
+    return jsonify({
+        "status": "success",
+        "message": "PIN verificado correctamente por el servidor",
+    })
+  else:
+    return (
+        jsonify({
+            "status": "error",
+            "message": "PIN incorrecto o expirado",
+        }),
+        400,
+    )
 
 
 if __name__ == "__main__":
