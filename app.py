@@ -1,3 +1,4 @@
+# app.py
 import base64
 from datetime import datetime, timedelta
 import os
@@ -12,8 +13,36 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 app = Flask(__name__)
 
-# Configuración limpia de CORS compatible con la APK y la Web
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+# Configuración abierta de CORS para aceptar la Web y la APK sin bloqueos
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "https://web-production-c5c1a01e.up.railway.app",
+                "https://appassets.androidplatform.net",
+                "capacitor://localhost",
+                "http://localhost",
+                "http://localhost:8100",
+                "*",
+            ]
+        }
+    },
+)
+
+
+@app.before_request
+def handle_preflight():
+  if request.method == "OPTIONS":
+    response = jsonify({"status": "ok"})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add(
+        "Access-Control-Allow-Headers", "Content-Type,Authorization,Accept"
+    )
+    response.headers.add(
+        "Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS"
+    )
+    return response, 200
 
 
 @app.after_request
@@ -28,9 +57,10 @@ def add_cors_headers(response):
   return response
 
 
+# Actualizado al dominio verificado en Resend
 REMITENTE = "Kreo Finanzas <contacto@acreditmh.store>"
 
-# Almacenamiento temporal en memoria para los PINs activos por DNI
+# Almacenamiento temporal en memoria para los PINs activos por DNI (Backend-side validation)
 PENDING_PINS = {}
 
 
@@ -141,7 +171,7 @@ def generar_pdf_contrato(
 
   monto_int = int(monto_val)
   base_un_mes = totales_un_mes.get(
-      monto_int, monto_val + (13.50 * (monto_val / 100.0))
+      monto_int, monto_val + 13.50 * (monto_val / 100.0)
   )
   ganancia_un_mes = base_un_mes - monto_val
 
@@ -196,8 +226,8 @@ def generar_pdf_contrato(
       f"Mediante el presente documento, Inversiones MH S.A.C.S. se obliga a"
       f" efectuar el desembolso de {monto_val:.2f} PEN a favor de {nombre},"
       f' identificado con D.N.I. N° {dni} (el "Usuario"), y el Usuario se'
-      f" compromete a devolver dicho monto en <b>{cuotas_count} cuotas"
-      f" sucesivas de carácter quincenal</b> a Inversiones MH S.A.C.S., más los"
+      f" compromete a devolver dicho monto en **{cuotas_count} cuotas"
+      f" sucesivas de carácter quincenal** a Inversiones MH S.A.C.S., más los"
       f" intereses generados de acuerdo con las condiciones siguientes."
   )
   story.append(Paragraph(intro_str, estilo_texto))
@@ -322,7 +352,7 @@ def generar_pdf_contrato(
           Paragraph("0.00 PEN / [no aplica]", estilo_der),
       ],
       [
-          Paragraph("<b>Total general:</b>", estilo_texto),
+          Paragraph(f"<b>Total general:</b>", estilo_texto),
           Paragraph(f"<b>{total_val:.2f} PEN</b>", estilo_bold_der),
       ],
       [
@@ -359,20 +389,24 @@ def generar_pdf_contrato(
   )
   story.append(Spacer(1, 2))
 
-  cronograma_rows = [[
-      Paragraph(
-          "<b>N.° Cuota</b>",
-          ParagraphStyle("Th1", parent=estilo_texto, fontName="Helvetica-Bold"),
-      ),
-      Paragraph(
-          "<b>Fecha de Vencimiento</b>",
-          ParagraphStyle("Th2", parent=estilo_texto, fontName="Helvetica-Bold"),
-      ),
-      Paragraph(
-          "<b>Monto a Pagar (PEN)</b>",
-          ParagraphStyle("Th3", parent=estilo_der, fontName="Helvetica-Bold"),
-      ),
-  ]]
+  cronograma_rows = [
+      [
+          Paragraph(
+              "<b>N.° Cuota</b>",
+              ParagraphStyle("Th1", parent=estilo_texto, fontName="Helvetica-Bold"),
+          ),
+          Paragraph(
+              "<b>Fecha de Vencimiento</b>",
+              ParagraphStyle("Th2", parent=estilo_texto, fontName="Helvetica-Bold"),
+          ),
+          Paragraph(
+              "<b>Monto a Pagar (PEN)</b>",
+              ParagraphStyle(
+                  "Th3", parent=estilo_der, fontName="Helvetica-Bold"
+              ),
+          ),
+      ]
+  ]
 
   try:
     dt_emision = datetime.strptime(fecha_emision, "%d.%m.%Y")
