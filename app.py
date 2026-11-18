@@ -577,8 +577,11 @@ def api_enviar_correo():
     return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@app.route("/api/enviar-pin-firma", methods=["POST"])
+@app.route("/api/enviar-pin-firma", methods=["POST", "OPTIONS"])
 def api_enviar_pin():
+  if request.method == "OPTIONS":
+    return jsonify({"status": "ok"}), 200
+
   datos = request.get_json() or {}
   destinatario = datos.get("email")
   nombre = datos.get("nombre", "Cliente")
@@ -626,8 +629,11 @@ def api_enviar_pin():
     return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@app.route("/api/verify-pin", methods=["POST"])
+@app.route("/api/verify-pin", methods=["POST", "OPTIONS"])
 def api_verify_pin():
+  if request.method == "OPTIONS":
+    return jsonify({"status": "ok"}), 200
+
   datos = request.get_json() or {}
   dni = datos.get("dni")
   pin_ingresado = datos.get("pin")
@@ -640,7 +646,7 @@ def api_verify_pin():
 
   pin_guardado = PENDING_PINS.get(dni)
 
-  if pin_guardado and pin_guardado == pin_ingresado:
+  if pin_guardado and str(pin_guardado) == str(pin_ingresado):
     del PENDING_PINS[dni]
     return jsonify({
         "status": "success",
