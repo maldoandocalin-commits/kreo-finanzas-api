@@ -13,48 +13,25 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 app = Flask(__name__)
 
-# Configuración abierta de CORS para aceptar la Web y la APK sin bloqueos
-CORS(
-    app,
-    resources={
-        r"/*": {
-            "origins": [
-                "https://web-production-ec0067f6.up.railway.app",
-                "https://web-production-c5c1a01e.up.railway.app",
-                "https://appassets.androidplatform.net",
-                "capacitor://localhost",
-                "http://localhost",
-                "http://localhost:8100",
-                "*",
-            ]
-        }
-    },
-)
+# CORS limpio para aceptar la Web y el APK sin conflictos de encabezados
+CORS(app)
 
 
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
         response = jsonify({"status": "ok"})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add(
-            "Access-Control-Allow-Headers", "Content-Type,Authorization,Accept"
-        )
-        response.headers.add(
-            "Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS"
-        )
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         return response, 200
 
 
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = (
-        "Content-Type,Authorization,Accept"
-    )
-    response.headers["Access-Control-Allow-Methods"] = (
-        "GET,POST,PUT,DELETE,OPTIONS"
-    )
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     return response
 
 
@@ -74,6 +51,9 @@ def enviar_email_resend(
     destinatario, asunto, contenido_html, pdf_path=None, nombre_pdf=None
 ):
     api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        return {"error": "Falta configurar RESEND_API_KEY en Railway"}
+
     url = "https://api.resend.com/emails"
 
     headers = {
@@ -99,7 +79,7 @@ def enviar_email_resend(
         }]
 
     try:
-        response = requests.post(url, json=payload, headers=headers)
+        response = requests.post(url, json=payload, headers=headers, timeout=20)
         return response.json()
     except Exception as e:
         print(f"Error al conectar con la API de Resend: {e}")
@@ -145,15 +125,15 @@ def generar_pdf_contrato(
 
     try:
         monto_val = float(monto)
-    except:
+    except Exception:
         monto_val = 100.0
     try:
         plazo_val = float(plazo)
-    except:
+    except Exception:
         plazo_val = 30.0
     try:
         total_val = float(total)
-    except:
+    except Exception:
         total_val = 113.50
 
     cuotas_count = int(plazo_val / 15)
@@ -232,8 +212,8 @@ def generar_pdf_contrato(
         f"Mediante el presente documento, Inversiones MH S.A.C.S. se obliga a"
         f" efectuar el desembolso de {monto_val:.2f} PEN a favor de {nombre},"
         f' identificado con D.N.I. N° {dni} (el "Usuario"), y el Usuario se'
-        f" compromete a devolver dicho monto en **{cuotas_count} cuotas"
-        f" sucesivas de carácter quincenal** a Inversiones MH S.A.C.S., más los"
+        f" compromete a devolver dicho monto en {cuotas_count} cuotas"
+        f" sucesivas de carácter quincenal a Inversiones MH S.A.C.S., más los"
         f" intereses generados de acuerdo con las condiciones siguientes."
     )
     story.append(Paragraph(intro_str, estilo_texto))
@@ -416,7 +396,7 @@ def generar_pdf_contrato(
 
     try:
         dt_emision = datetime.strptime(fecha_emision, "%d.%m.%Y")
-    except:
+    except Exception:
         dt_emision = datetime.now()
 
     monto_cuota_base = round(total_val / cuotas_count, 2)
@@ -508,7 +488,7 @@ def generar_pdf_contrato(
 
 @app.route("/api/enviar-correo-aprobacion", methods=["POST"])
 def api_enviar_correo():
-    datos = request.get_json() or {}
+    datos = request.get_json(silent=True) or {}
     destinatario = datos.get("email")
     nombre = datos.get("nombre", "Cliente")
     dni = datos.get("dni", "00000000")
@@ -525,7 +505,7 @@ def api_enviar_correo():
             dt_emision = datetime.strptime(fecha_emision, "%d.%m.%Y")
             dt_vencimiento = dt_emision + timedelta(days=int(plazo))
             vencimiento = dt_vencimiento.strftime("%d.%m.%Y")
-        except:
+        except Exception:
             vencimiento = "24.11.2026"
 
     if not destinatario:
@@ -585,7 +565,7 @@ def api_enviar_correo():
 
 @app.route("/api/enviar-pin-firma", methods=["POST"])
 def api_enviar_pin():
-    datos = request.get_json() or {}
+    datos = request.get_json(silent=True) or {}
     destinatario = datos.get("email")
     nombre = datos.get("nombre", "Cliente")
     dni = datos.get("dni", "00000000")
@@ -634,7 +614,7 @@ def api_enviar_pin():
 
 @app.route("/api/verify-pin", methods=["POST"])
 def api_verify_pin():
-    datos = request.get_json() or {}
+    datos = request.get_json(silent=True) or {}
     dni = datos.get("dni")
     pin_ingresado = datos.get("pin")
 
